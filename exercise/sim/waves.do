@@ -30,6 +30,12 @@ add wave -hex UUT/VGA_GREEN_O
 add wave -hex UUT/VGA_BLUE_O
 
 add wave -divider -height 10 {}
+add wave -uns UUT/Red_address
+add wave -uns UUT/Green_address
+add wave -uns UUT/Blue_address_E
+add wave -hex UUT/blue_delay_E
+add wave -uns UUT/Blue_address_O
+add wave -hex UUT/blue_delay_O
 add wave -uns UUT/SRAM_address
 # add wave -hex UUT/SRAM_write_data
 add wave -bin UUT/SRAM_we_n
