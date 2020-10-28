@@ -66,6 +66,18 @@ logic SRAM_ready;
 
 logic [15:0] VGA_sram_data[2:0];
 
+logic [15:0] VGA_blue_buffE;
+logic [15:0] VGA_blue_buffO;
+logic [7:0] VGA_red_buff;
+
+logic blue_delay;
+logic stored_blueE;
+logic stored_blueO;
+logic [17:0]blue_to_red;
+logic [16:0]green_to_red;
+logic [16:0]green_to_blue;
+logic [17:0]row_counter;
+
 logic [2:0] rect_row_count;     // Number of rectangles in a row
 logic [2:0] rect_col_count;     // Number of rectangles in a column
 logic [5:0] rect_width_count;   // Width of each rectangle
@@ -152,7 +164,20 @@ always_ff @ (posedge CLOCK_50_I or negedge resetn) begin
 		rect_height_count <= 5'd0;
 		VGA_red <= 8'd0;
 		VGA_green <= 8'd0;
-		VGA_blue <= 8'd0;				
+		VGA_blue <= 8'd0;		
+
+		VGA_blue_buffE <= 15'd0;
+		VGA_blue_buffO <= 15'd0;
+		VGA_red_buff <= 8'd0;
+		
+		blue_delay <= 1'b0;
+		stored_blueE <= 1'b0;
+		stored_blueO <= 1'b0;
+		blue_to_red <= 17'd95999;
+	   green_to_red <= 16'd38399;
+		green_to_blue <= 16'd38400;
+		row_counter <= 18'd0;
+		
 		SRAM_we_n <= 1'b1;
 		SRAM_write_data <= 16'd0;
 		SRAM_address <= 18'd0;
@@ -257,7 +282,7 @@ always_ff @ (posedge CLOCK_50_I or negedge resetn) begin
 				VGA_sram_data[1] <= 16'd0;
 				VGA_sram_data[0] <= 16'd0;
 				
-				SRAM_address <= 18'h00000;									
+				SRAM_address <= 18'd146944;									
 			
 
 				state <= S_WAIT_NEW_PIXEL_ROW;			
@@ -269,14 +294,25 @@ always_ff @ (posedge CLOCK_50_I or negedge resetn) begin
 						if (pixel_Y_pos == VIEW_AREA_TOP) 
 							// Start a new frame
 							// Provide address for data 1
-							SRAM_address <= 18'd0;
+							SRAM_address <= 18'd146944;
 						else 
 							// Start a new row of pixels
 							// Provide address for data 1
-							SRAM_address <= SRAM_address - 18'd4;
+							if(row_counter == 0)
+								SRAM_address <= SRAM_address - 18'd4;
+							else
+								SRAM_address <= SRAM_address - 18'd1;
 							state <= S_NEW_PIXEL_ROW_DELAY_1;
 					end
 				end
+				if(row_counter > 18'b0 && stored_blueO == 1'b0) begin
+				
+					VGA_sram_data[0][7:0] <= SRAM_read_data[15:8];
+					VGA_blue_buffO[7:0] <= SRAM_read_data[7:0];//stores lsb odd blue pixel in sram location
+					stored_blueO <= 1'b1;
+					blue_delay <= 1'b1;
+				end
+					
 				VGA_red <= 8'd0;
 				VGA_green <= 8'd0;
 				VGA_blue <= 8'd0;								
@@ -284,75 +320,122 @@ always_ff @ (posedge CLOCK_50_I or negedge resetn) begin
 
 			S_NEW_PIXEL_ROW_DELAY_1: begin	
 				// Provide address for data 2
-				SRAM_address <= SRAM_address + 18'h00001;				
+				blue_delay <= 1'b0;
+				SRAM_address <= SRAM_address + 18'd38400;				
 				state <= S_NEW_PIXEL_ROW_DELAY_2;		
 			end
-				S_NEW_PIXEL_ROW_DELAY_2: begin	
-				// Provide address for data 3
-				SRAM_address <= SRAM_address + 18'h00001;		
+			S_NEW_PIXEL_ROW_DELAY_2: begin	
+				
+				SRAM_address <= SRAM_address + green_to_blue;	
+				
 				state <= S_NEW_PIXEL_ROW_DELAY_3;		
 			end
 	
 			S_NEW_PIXEL_ROW_DELAY_3: begin		
-				// Buffer data 1
+				
+				SRAM_address <= SRAM_address + 18'd19200;
 				VGA_sram_data[2] <= SRAM_read_data;			
 				state <= S_NEW_PIXEL_ROW_DELAY_4;
 			end
 
 			S_NEW_PIXEL_ROW_DELAY_4: begin
-				// Provide address for data 1
-				SRAM_address <= SRAM_address + 18'h00001;			
-				// Buffer data 2
+				
+				SRAM_address <= (SRAM_address - blue_to_red);			
+				
 				VGA_sram_data[1] <= SRAM_read_data;							
 				state <= S_NEW_PIXEL_ROW_DELAY_5;			
 			end
 
 			S_NEW_PIXEL_ROW_DELAY_5: begin
 				// Provide address for data 2
-				SRAM_address <= SRAM_address + 18'h00001;		
+				SRAM_address <= SRAM_address + 18'd38400;	//red to green	
 				// Buffer data 3
-				VGA_sram_data[0] <= SRAM_read_data;					
+				
+				if(stored_blueE == 1'b0) begin
+					VGA_sram_data[0][15:8] <= SRAM_read_data[15:8];		
+					VGA_blue_buffE[15:8] <= SRAM_read_data[7:0];
+					stored_blueE <= 1'b1;
+				end else begin
+					VGA_sram_data[0][15:8] <= VGA_blue_buffE[15:8];
+					stored_blueE <= 1'b0;
+				end
+				
 				state <= S_FETCH_PIXEL_DATA_0;			
 			end
 
 			S_FETCH_PIXEL_DATA_0: begin
 				// Provide address for data 3
-				SRAM_address <= SRAM_address + 18'h00001;					
+				
+				
+				SRAM_address <= SRAM_address + green_to_blue;
+				
+				//green_to_blue <= green_to_blue - 16'd1;
+				//blue_to_red <= blue_to_red - 17'd1;
+				
+					
+				if(stored_blueO == 1'b0) begin
+					VGA_sram_data[0][7:0] <= SRAM_read_data[15:8];
+					VGA_blue_buffO[7:0] <= SRAM_read_data[7:0];//stores lsb odd blue pixel in sram location
+					stored_blueO <= 1'b1;
+				end else begin
+					VGA_sram_data[0][7:0] <= VGA_blue_buffO[7:0];
+					stored_blueO <= 1'b0;
+				end
+				
 				// Provide RGB data
 				VGA_red <= VGA_sram_data[2][15:8];
-				VGA_green <= VGA_sram_data[2][7:0];
-				VGA_blue <= VGA_sram_data[1][15:8];							
+				VGA_green <= VGA_sram_data[1][15:8];
+				VGA_blue <= VGA_sram_data[0][15:8];							
 				state <= S_FETCH_PIXEL_DATA_1;
 			end
 
 			S_FETCH_PIXEL_DATA_1: begin		
 				// Buffer data 1
-				VGA_sram_data[2] <= SRAM_read_data;				
+				
+				SRAM_address <= SRAM_address + 18'd19200;
+
+				VGA_sram_data[2] <= SRAM_read_data;	
+				VGA_red_buff <= VGA_sram_data[2][7:0];
 				state <= S_FETCH_PIXEL_DATA_2;
 			end
 
 			S_FETCH_PIXEL_DATA_2: begin
 				// Provide address for data 1
-				SRAM_address <= SRAM_address + 18'h00001;	
+				
+				SRAM_address <= SRAM_address - blue_to_red;		
+				
+				
 				// Buffer data 2
 				VGA_sram_data[1] <= SRAM_read_data;
 				// Provide RGB data
-				VGA_red <= VGA_sram_data[1][7:0];
-				VGA_green <= VGA_sram_data[0][15:8];
+				VGA_red <= VGA_red_buff;
+				VGA_green <= VGA_sram_data[1][7:0];
 				VGA_blue <= VGA_sram_data[0][7:0];			
 				state <= S_FETCH_PIXEL_DATA_3;
 			end
 
 			S_FETCH_PIXEL_DATA_3: begin 
-				// Provide address for data 2
-				SRAM_address <= SRAM_address + 18'h00001;
+				// Provide address for data 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
+				
 				// Buffer data 3
-				VGA_sram_data[0] <= SRAM_read_data;
-				if (pixel_X_pos < (VIEW_AREA_RIGHT - 2))
+				
+				if(stored_blueE == 1'b0) begin
+					VGA_sram_data[0][15:8] <= SRAM_read_data[15:8];		
+					VGA_blue_buffE[15:8] <= SRAM_read_data[7:0];
+					stored_blueE <= 1'b1;
+				end else begin
+					VGA_sram_data[0][15:8] <= VGA_blue_buffE[15:8];
+					stored_blueE <= 1'b0;
+				end
+				
+				if (pixel_X_pos < (VIEW_AREA_RIGHT - 2))begin
 					// Still within one row
 					state <= S_FETCH_PIXEL_DATA_0;
-				else
+					SRAM_address <= SRAM_address + 18'd38400;
+				end else begin
 					state <= S_WAIT_NEW_PIXEL_ROW;
+					row_counter <= row_counter + 18'd1;
+				end
 			end		
 
 			default: state <= S_IDLE;
